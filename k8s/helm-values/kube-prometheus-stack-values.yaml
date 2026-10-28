@@ -1,0 +1,146 @@
+# Values for prometheus-community/kube-prometheus-stack (chart 91.5.2).
+# Trimmed down for a single-node minikube cluster / CI runner: small resource
+# requests, ephemeral storage. Alertmanager is wired to Slack (see below) -
+# the webhook itself is never in this file, it's read from a Secret created
+# by scripts/setup-minikube-cluster.sh (see README "Alerting" section).
+
+grafana:
+  enabled: true
+  defaultDashboardsEnabled: true
+  adminPassword: admin   # dev-only. Use a Secret + `admin.existingSecret` for anything real.
+  sidecar:
+    datasources:
+      # The chart auto-provisions a Prometheus datasource with a
+      # chart-generated (not fixed) UID. We need a *known* UID so Tempo's
+      # serviceMap/tracesToMetrics config and our dashboards can reference
+      # it reliably, so we replace it with our own entry below instead.
+      # Verify this key still disables it: `helm show values
+      # prometheus-community/kube-prometheus-stack --version 91.5.2 | grep -A3 defaultDatasourceEnabled`
+      defaultDatasourceEnabled: false
+  additionalDataSources:
+    - name: Prometheus
+      type: prometheus
+      uid: prometheus
+      access: proxy
+      url: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090
+      isDefault: true
+      jsonData:
+        timeInterval: 15s
+        exemplarTraceIdDestinations:
+          - name: trace_id
+            datasourceUid: tempo
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki.observability.svc.cluster.local:3100
+      uid: loki
+      jsonData:
+        derivedFields:
+          - datasourceUid: tempo
+            matcherRegex: 'trace_id=(\w+)'
+            name: TraceID
+            url: "$${__value.raw}"
+    - name: Tempo
+      type: tempo
+      uid: tempo
+      access: proxy
+      url: http://tempo.observability.svc.cluster.local:3200
+      jsonData:
+        tracesToLogsV2:
+          datasourceUid: loki
+          filterByTraceID: true
+        tracesToMetrics:
+          datasourceUid: prometheus
+        serviceMap:
+          datasourceUid: prometheus
+        nodeGraph:
+          enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+prometheus:
+  prometheusSpec:
+    retention: 24h
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    # Ephemeral for minikube/CI. Replace with a real StorageClass-backed PVC
+    # for anything persistent (see README §7).
+    storageSpec: {}
+    # Lets Tempo's metrics-generator remote_write trace-derived metrics
+    # straight into this Prometheus (see k8s/helm-values/tempo-values.yaml).
+    enableRemoteWriteReceiver: true
+    # Auto-discover our PrometheusRule (k8s/prometheus-rules.yaml) and any
+    # ServiceMonitors regardless of extra label restrictions.
+    ruleSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    additionalScrapeConfigs:
+      - job_name: otel-collector
+        static_configs:
+          - targets:
+              - otel-collector-opentelemetry-collector.observability.svc.cluster.local:8889
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+    # Created by scripts/setup-minikube-cluster.sh (kubectl create secret
+    # generic alertmanager-slack-webhook --from-literal=slack_url=...);
+    # mounted at /etc/alertmanager/secrets/alertmanager-slack-webhook/slack_url.
+    secrets:
+      - alertmanager-slack-webhook
+  config:
+    global:
+      resolve_timeout: 5m
+      slack_api_url_file: /etc/alertmanager/secrets/alertmanager-slack-webhook/slack_url
+    route:
+      receiver: slack-default
+      group_by: ["alertname", "service"]
+      group_wait: 10s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - matchers:
+            - severity = "critical"
+          receiver: slack-critical
+          repeat_interval: 1h
+    receivers:
+      - name: slack-default
+        slack_configs:
+          - channel: "#observability-alerts"
+            send_resolved: true
+            title: '{{ if eq .Status "firing" }}:red_circle:{{ else }}:large_green_circle:{{ end }} [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+            text: >-
+              {{ range .Alerts }}*Service:* {{ .Labels.service }}
+              *Summary:* {{ .Annotations.summary }}
+              *Description:* {{ .Annotations.description }}
+              {{ end }}
+      - name: slack-critical
+        slack_configs:
+          - channel: "#observability-alerts-critical"
+            send_resolved: true
+            title: ':rotating_light: [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+            text: >-
+              {{ range .Alerts }}*Service:* {{ .Labels.service }}
+              *Summary:* {{ .Annotations.summary }}
+              *Description:* {{ .Annotations.description }}
+              {{ end }}
+    inhibit_rules:
+      - source_matchers:
+          - alertname = "HighErrorRateCritical"
+        target_matchers:
+          - alertname = "HighErrorRate"
+        equal: ["service"]
+
+# kube-state-metrics / node-exporter ship by default and are lightweight;
+# left enabled since they're what makes the default k8s dashboards useful.
+kubeStateMetrics:
+  enabled: true
+nodeExporter:
+  enabled: true

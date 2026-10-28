@@ -1,0 +1,36 @@
+# Values for grafana/tempo (chart 1.24.4), monolithic mode - one Tempo
+# process handling ingest + storage + query, which is all a demo/dev
+# cluster needs. Local disk storage; see README §7 for object storage.
+
+tempo:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+  retention: 48h
+
+persistence:
+  enabled: false   # emptyDir for minikube/CI
+
+serviceMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack
+
+# OTLP receivers are enabled by default in this chart on 4317 (grpc) / 4318 (http).
+
+# --- Correlation: trace-derived metrics -> Prometheus (best-effort) --------
+# Mirrors docker/tempo/tempo.yaml's metrics_generator block (service-graphs +
+# span-metrics processors, remote_write to Prometheus), but this chart's
+# values schema for it is NOT independently verified here (no network access
+# to fetch `helm show values grafana/tempo --version 1.24.4` while building
+# this). Before relying on it, run that command and compare against the
+# keys below - if they don't match, use `--set-file` / a `config:` raw
+# override to set the same options Tempo's config format expects (that raw
+# format IS the one used in docker/tempo/tempo.yaml, which is correct).
+metricsGenerator:
+  enabled: true
+  remoteWriteUrl: "http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090/api/v1/write"
+  processor:
+    serviceGraphs: {}
+    spanMetrics: {}

@@ -1,0 +1,146 @@
+# Auto-derived from docker/grafana/provisioning/dashboards/json/otel-collector-health.json
+# so the same dashboard shows up in both Compose and Kubernetes Grafana,
+# without hand-copying JSON (error prone). If you edit the dashboard, edit
+# the source file under docker/ and regenerate this one to match.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-otel-collector-health
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  otel-collector-health.json: |
+    {
+      "title": "OTel Collector - Health",
+      "uid": "otel-collector-health",
+      "tags": [
+        "otel-collector",
+        "pipeline-health"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Accepted vs refused spans",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(otelcol_receiver_accepted_spans_total[5m]))",
+              "legendFormat": "accepted"
+            },
+            {
+              "expr": "sum(rate(otelcol_receiver_refused_spans_total[5m]))",
+              "legendFormat": "refused"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Accepted vs refused metric points",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(otelcol_receiver_accepted_metric_points_total[5m]))",
+              "legendFormat": "accepted"
+            },
+            {
+              "expr": "sum(rate(otelcol_receiver_refused_metric_points_total[5m]))",
+              "legendFormat": "refused"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Accepted vs refused log records",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(otelcol_receiver_accepted_log_records_total[5m]))",
+              "legendFormat": "accepted"
+            },
+            {
+              "expr": "sum(rate(otelcol_receiver_refused_log_records_total[5m]))",
+              "legendFormat": "refused"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Export failures by signal (should be flat 0)",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(otelcol_exporter_send_failed_spans_total[5m]))",
+              "legendFormat": "traces"
+            },
+            {
+              "expr": "sum(rate(otelcol_exporter_send_failed_metric_points_total[5m]))",
+              "legendFormat": "metrics"
+            },
+            {
+              "expr": "sum(rate(otelcol_exporter_send_failed_log_records_total[5m]))",
+              "legendFormat": "logs"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Batch processor - average batch send size",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 16
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "rate(otelcol_processor_batch_batch_send_size_sum[5m]) / rate(otelcol_processor_batch_batch_send_size_count[5m])",
+              "legendFormat": "avg batch size"
+            }
+          ]
+        }
+      ]
+    }

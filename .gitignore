@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+*.log
+diagnostics/
+.DS_Store
+
+# Real secrets - only the .example templates are committed.
+docker/alertmanager/secrets/slack_url
+docker/grafana/provisioning/alerting/contactpoints.yaml
+k8s/helm-values/alertmanager-secrets.yaml

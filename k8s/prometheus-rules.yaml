@@ -1,0 +1,111 @@
+# PrometheusRule CR - the Kubernetes-native equivalent of
+# docker/prometheus/alert-rules.yml. The prometheus-operator (installed by
+# kube-prometheus-stack) watches for PrometheusRule objects and loads them
+# into Prometheus automatically - no `rule_files:` config needed like in
+# the Compose setup.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: demo-app-and-otel-collector-rules
+  namespace: observability
+  labels:
+    release: kube-prometheus-stack   # matches ruleSelector convention used elsewhere in this repo
+spec:
+  groups:
+    - name: demo-app.rules
+      rules:
+        - alert: DemoAppNotReporting
+          expr: absent_over_time(demo_app_work_requests_total[10m])
+          for: 5m
+          labels:
+            severity: critical
+            service: demo-app
+          annotations:
+            summary: "demo-app has not reported any metrics in 10+ minutes"
+            description: "No demo_app_work_requests_total samples seen. Check the app pod and the OTel Collector's OTLP receiver logs."
+
+        - alert: HighErrorRate
+          expr: |
+            (
+              sum(rate(demo_app_errors_total[5m]))
+              /
+              sum(rate(demo_app_work_requests_total[5m]))
+            ) > 0.2
+          for: 2m
+          labels:
+            severity: warning
+            service: demo-app
+          annotations:
+            summary: "demo-app error rate above 20%"
+            description: "{{ $value | humanizePercentage }} of /work and /error requests are failing (5m window)."
+
+        - alert: HighErrorRateCritical
+          expr: |
+            (
+              sum(rate(demo_app_errors_total[5m]))
+              /
+              sum(rate(demo_app_work_requests_total[5m]))
+            ) > 0.5
+          for: 2m
+          labels:
+            severity: critical
+            service: demo-app
+          annotations:
+            summary: "demo-app error rate above 50%"
+            description: "{{ $value | humanizePercentage }} of requests are failing (5m window)."
+
+        - alert: HighLatencyP95
+          expr: |
+            histogram_quantile(0.95, sum(rate(demo_app_request_duration_seconds_bucket[5m])) by (le)) > 0.5
+          for: 5m
+          labels:
+            severity: warning
+            service: demo-app
+          annotations:
+            summary: "demo-app p95 latency above 500ms"
+            description: "p95 request duration is {{ $value | humanizeDuration }}."
+
+    - name: otel-collector.rules
+      rules:
+        - alert: OtelCollectorExportFailures
+          expr: |
+            sum(rate(otelcol_exporter_send_failed_spans_total[5m]))
+            + sum(rate(otelcol_exporter_send_failed_metric_points_total[5m]))
+            + sum(rate(otelcol_exporter_send_failed_log_records_total[5m]))
+            > 0
+          for: 5m
+          labels:
+            severity: warning
+            service: otel-collector
+          annotations:
+            summary: "OTel Collector is failing to export telemetry to a backend"
+            description: "Check `kubectl logs -n observability deploy/otel-collector-opentelemetry-collector`."
+
+    - name: service-graph.rules
+      rules:
+        - alert: HighServiceGraphErrorRate
+          expr: |
+            (
+              sum(rate(traces_service_graph_request_failed_total[5m]))
+              /
+              sum(rate(traces_service_graph_request_total[5m]))
+            ) > 0.2
+          for: 5m
+          labels:
+            severity: warning
+            service: demo-app
+          annotations:
+            summary: "Trace-derived service graph shows >20% failed calls"
+            description: "Same underlying failures as HighErrorRate, derived purely from trace data via Tempo's metrics-generator."
+
+    - name: loki.rules
+      rules:
+        - alert: LokiCrashLoopBackOff
+          expr: kube_pod_container_status_waiting_reason{namespace="observability", container="loki", reason="CrashLoopBackOff"} == 1
+          for: 1m
+          labels:
+            severity: warning
+            service: loki
+          annotations:
+            summary: "Loki container is in CrashLoopBackOff"
+            description: "Container {{ $labels.container }} in pod {{ $labels.pod }} has been restarting for more than 1 minute. Check the Loki pod logs in namespace {{ $labels.namespace }}."

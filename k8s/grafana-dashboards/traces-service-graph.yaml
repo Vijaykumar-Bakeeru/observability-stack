@@ -1,0 +1,113 @@
+# Auto-derived from docker/grafana/provisioning/dashboards/json/traces-service-graph.json
+# so the same dashboard shows up in both Compose and Kubernetes Grafana,
+# without hand-copying JSON (error prone). If you edit the dashboard, edit
+# the source file under docker/ and regenerate this one to match.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-traces-service-graph
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  traces-service-graph.json: |
+    {
+      "title": "Traces - Service Graph & Span Metrics",
+      "uid": "traces-service-graph",
+      "tags": [
+        "tempo",
+        "traces",
+        "correlation"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "description": "All panels here read Prometheus metrics that Tempo's metrics-generator derives directly from trace data (see docker/tempo/tempo.yaml) - proof that traces, metrics, and alerting are wired together, not three separate silos. For the interactive graphical service map, use Grafana Explore -> Tempo datasource -> Service Graph tab.",
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Request rate by service edge (client -> server)",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum by (client, server) (rate(traces_service_graph_request_total[5m]))",
+              "legendFormat": "{{client}} -> {{server}}"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Failed request rate by service edge",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum by (client, server) (rate(traces_service_graph_request_failed_total[5m]))",
+              "legendFormat": "{{client}} -> {{server}}"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Span latency p95 by service/operation (from spanmetrics)",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 9
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            }
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(traces_spanmetrics_latency_bucket[5m])) by (le, service, span_name))",
+              "legendFormat": "{{service}} / {{span_name}}"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Span call volume by service/operation/status",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 9
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum by (service, span_name, status_code) (rate(traces_spanmetrics_calls_total[5m]))",
+              "legendFormat": "{{service}} / {{span_name}} / {{status_code}}"
+            }
+          ]
+        }
+      ]
+    }

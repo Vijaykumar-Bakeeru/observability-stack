@@ -1,0 +1,113 @@
+# Prometheus alerting rules for the observability stack itself and for the
+# demo app. All of these are deliberately built on metrics this repo defines
+# explicitly (demo_app_*, otelcol_*, traces_*) rather than on auto-instrumentation
+# metric names, which vary across OTel SDK/semconv versions - see the comment
+# at the top of docker/demo-app/app.py.
+#
+# Verify this file with `promtool check rules docker/prometheus/alert-rules.yml`
+# before relying on it (not run in this environment - no network access to
+# fetch the promtool binary here; see README for local verification).
+
+groups:
+  - name: demo-app.rules
+    rules:
+      - alert: DemoAppNotReporting
+        # The app pushes metrics via OTLP -> Collector -> Prometheus scrape;
+        # it isn't scraped directly, so "no samples at all" is the signal
+        # that it's silently dead rather than a scrape-target `up` check.
+        expr: absent_over_time(demo_app_work_requests_total[10m])
+        for: 5m
+        labels:
+          severity: critical
+          service: demo-app
+        annotations:
+          summary: "demo-app has not reported any metrics in 10+ minutes"
+          description: "No demo_app_work_requests_total samples seen. Check the app container/pod, and the OTel Collector's OTLP receiver logs."
+
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(demo_app_errors_total[5m]))
+            /
+            sum(rate(demo_app_work_requests_total[5m]))
+          ) > 0.2
+        for: 2m
+        labels:
+          severity: warning
+          service: demo-app
+        annotations:
+          summary: "demo-app error rate above 20%"
+          description: "{{ $value | humanizePercentage }} of /work and /error requests are failing (5m window). Check Loki for `{container=\"demo-app\"} |= \"ERROR\"` and Tempo for errored traces on service demo-app."
+
+      - alert: HighErrorRateCritical
+        expr: |
+          (
+            sum(rate(demo_app_errors_total[5m]))
+            /
+            sum(rate(demo_app_work_requests_total[5m]))
+          ) > 0.5
+        for: 2m
+        labels:
+          severity: critical
+          service: demo-app
+        annotations:
+          summary: "demo-app error rate above 50%"
+          description: "{{ $value | humanizePercentage }} of requests are failing (5m window). This is the same signal as HighErrorRate at a higher threshold/severity."
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum(rate(demo_app_request_duration_seconds_bucket[5m])) by (le)) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: demo-app
+        annotations:
+          summary: "demo-app p95 latency above 500ms"
+          description: "p95 request duration is {{ $value | humanizeDuration }}. Trigger manually with `curl 'http://localhost:8000/work?slow=1'` in a loop to test this alert."
+
+  - name: otel-collector.rules
+    rules:
+      - alert: OtelCollectorDown
+        expr: up{job="otel-collector-internal"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: otel-collector
+        annotations:
+          summary: "OTel Collector is not reachable"
+          description: "Prometheus can't scrape the Collector's internal telemetry endpoint (:8888). Every downstream signal (metrics, traces, logs) is likely blocked."
+
+      - alert: OtelCollectorExportFailures
+        expr: |
+          sum(rate(otelcol_exporter_send_failed_spans_total[5m]))
+          + sum(rate(otelcol_exporter_send_failed_metric_points_total[5m]))
+          + sum(rate(otelcol_exporter_send_failed_log_records_total[5m]))
+          > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: otel-collector
+        annotations:
+          summary: "OTel Collector is failing to export telemetry to a backend"
+          description: "The Collector is accepting data but failing to send it on to Prometheus/Tempo/Loki. Check `docker compose logs otel-collector` for exporter errors."
+
+  # Demonstrates alerting directly off trace-derived metrics: Tempo's
+  # metrics-generator (see docker/tempo/tempo.yaml) turns span data into
+  # these traces_service_graph_* series and remote_writes them into
+  # Prometheus - no separate app instrumentation involved.
+  - name: service-graph.rules
+    rules:
+      - alert: HighServiceGraphErrorRate
+        expr: |
+          (
+            sum(rate(traces_service_graph_request_failed_total[5m]))
+            /
+            sum(rate(traces_service_graph_request_total[5m]))
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          service: demo-app
+        annotations:
+          summary: "Trace-derived service graph shows >20% failed calls"
+          description: "Same underlying failures as HighErrorRate, but derived purely from trace data via Tempo's metrics-generator - if both fire together, the app metric and the trace data agree, which is a strong signal that this is a real regression, not an instrumentation bug in one signal."

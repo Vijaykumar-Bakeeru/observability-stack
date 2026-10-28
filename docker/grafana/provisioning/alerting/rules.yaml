@@ -1,0 +1,60 @@
+# Grafana-managed alert rule(s) - these run inside Grafana itself (not
+# Alertmanager) and can query any datasource, which is the point here: a
+# log-volume alert that Prometheus/Alertmanager has no way to evaluate
+# since it never sees log data. This is the "logs can alert too, not just
+# metrics" half of the alerting story - see docker/prometheus/alert-rules.yml
+# for the metric/trace-based alerts.
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: log-based-alerts
+    folder: Observability Stack
+    interval: 1m
+    rules:
+      - uid: error-log-spike
+        title: ErrorLogSpike
+        condition: C
+        for: 2m
+        labels:
+          severity: warning
+          service: demo-app
+        annotations:
+          summary: "demo-app is logging errors faster than normal"
+          description: "More than 5 ERROR-level log lines from demo-app in the last 5 minutes. Trigger manually with: for i in $(seq 20); do curl -s http://localhost:8000/error; done"
+        data:
+          - refId: A
+            datasourceUid: loki
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: A
+              queryType: range
+              expr: 'count_over_time({container="demo-app"} |= "ERROR" [5m])'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [5]
+        noDataState: OK
+        execErrState: Error

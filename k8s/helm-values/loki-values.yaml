@@ -1,0 +1,50 @@
+# Values for grafana/loki (chart 7.3.0), single-binary deployment mode.
+# Filesystem storage - fine for minikube/CI/dev. Swap `storage.type` to `s3`
+# (or gcs/azure) plus real bucket credentials for a persistent cluster.
+
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+
+singleBinary:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+  persistence:
+    enabled: false   # emptyDir for minikube/CI; set true + storageClass for real clusters
+
+# Disable components not needed in single-binary mode.
+backend:
+  replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0
+
+gateway:
+  enabled: false
+
+test:
+  enabled: false
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack

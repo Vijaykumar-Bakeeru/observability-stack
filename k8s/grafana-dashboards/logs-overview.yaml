@@ -1,0 +1,118 @@
+# Auto-derived from docker/grafana/provisioning/dashboards/json/logs-overview.json
+# so the same dashboard shows up in both Compose and Kubernetes Grafana,
+# without hand-copying JSON (error prone). If you edit the dashboard, edit
+# the source file under docker/ and regenerate this one to match.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-logs-overview
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  logs-overview.json: |
+    {
+      "title": "Logs Overview",
+      "uid": "logs-overview",
+      "tags": [
+        "loki",
+        "logs"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "panels": [
+        {
+          "type": "timeseries",
+          "title": "Total log lines/sec - demo-app",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "targets": [
+            {
+              "expr": "sum(count_over_time({container=\"demo-app\"}[1m])) by (container)"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "ERROR-level log lines/sec - demo-app",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "fixedColor": "red",
+                "mode": "fixed"
+              }
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(count_over_time({container=\"demo-app\"} |= \"ERROR\" [1m]))"
+            }
+          ]
+        },
+        {
+          "type": "logs",
+          "title": "demo-app - error logs (click a line, then follow the TraceID link to jump to the trace)",
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 8
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true
+          },
+          "targets": [
+            {
+              "expr": "{container=\"demo-app\"} |= \"ERROR\""
+            }
+          ]
+        },
+        {
+          "type": "logs",
+          "title": "demo-app - all logs",
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 18
+          },
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true
+          },
+          "targets": [
+            {
+              "expr": "{container=\"demo-app\"}"
+            }
+          ]
+        }
+      ]
+    }

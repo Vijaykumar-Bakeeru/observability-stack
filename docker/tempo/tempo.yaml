@@ -1,0 +1,58 @@
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 48h
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+    wal:
+      path: /var/tempo/wal
+
+# Correlation: turns every ingested trace into two extra Prometheus metric
+# families, pushed straight into Prometheus via remote_write, with no extra
+# instrumentation needed in the app:
+#   traces_spanmetrics_latency{...}         - per-service/operation latency,
+#                                              derived directly from span
+#                                              durations
+#   traces_spanmetrics_calls_total{...}     - per-service/operation call
+#                                              count, with status_code label
+#   traces_service_graph_request_total{...} - edges between services (who
+#                                              calls whom), for Grafana's
+#                                              Node graph panel
+#   traces_service_graph_request_failed_total{...}
+# This is what lets a Prometheus alert fire directly off trace data (see
+# docker/prometheus/alert-rules.yml -> HighServiceGraphErrorRate) and what
+# powers the "Traces & service graph" Grafana dashboard.
+overrides:
+  defaults:
+    metrics_generator:
+      processors: [service-graphs, span-metrics]
+
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+  traces_storage:
+    path: /var/tempo/generator/traces

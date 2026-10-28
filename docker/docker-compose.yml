@@ -1,0 +1,159 @@
+version: "3.9"
+
+# DevOps Observability Stack - local dev environment.
+# Bring up: docker compose up -d --build
+# Tear down: docker compose down -v
+
+services:
+  # ---------------------------------------------------------------------
+  # Demo application - instrumented with the OpenTelemetry SDK.
+  # Emits metrics + traces via OTLP to the Collector, logs to stdout
+  # (scraped by Promtail below).
+  # ---------------------------------------------------------------------
+  demo-app:
+    build:
+      context: ./demo-app
+    container_name: demo-app
+    ports:
+      - "8000:8000"
+    environment:
+      OTEL_SERVICE_NAME: demo-app
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_METRICS_EXPORTER: otlp
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_LOGS_EXPORTER: otlp
+    depends_on:
+      - otel-collector
+    networks: [observability]
+
+  # ---------------------------------------------------------------------
+  # OpenTelemetry Collector - single point of ingestion (OTLP),
+  # fans out to Prometheus (scrape), Tempo (traces), Loki (logs).
+  # ---------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.113.0
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus exporter scrape endpoint
+    networks: [observability]
+
+  # ---------------------------------------------------------------------
+  # Prometheus - pulls metrics from the Collector's /metrics endpoint.
+  # ---------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      # Lets Tempo's metrics-generator push trace-derived metrics straight
+      # into Prometheus (see docker/tempo/tempo.yaml metrics_generator.storage.remote_write).
+      - "--web.enable-remote-write-receiver"
+      # Stores an exemplar (a trace ID) alongside metric samples so Grafana
+      # can jump from a spike on a graph straight to the trace that caused it.
+      - "--enable-feature=exemplar-storage"
+    ports:
+      - "9090:9090"
+    depends_on:
+      - alertmanager
+    networks: [observability]
+
+  # ---------------------------------------------------------------------
+  # Alertmanager - routes firing Prometheus alerts to Slack.
+  # ---------------------------------------------------------------------
+  alertmanager:
+    image: prom/alertmanager:v0.34.0
+    container_name: alertmanager
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      # Real webhook URL, gitignored - see alertmanager/secrets/slack_url.example.
+      - ./alertmanager/secrets/slack_url:/etc/alertmanager/secrets/slack_url:ro
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    ports:
+      - "9093:9093"
+    networks: [observability]
+
+  # ---------------------------------------------------------------------
+  # Loki - log aggregation backend.
+  # ---------------------------------------------------------------------
+  loki:
+    image: grafana/loki:3.3.0
+    container_name: loki
+    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    networks: [observability]
+
+  # ---------------------------------------------------------------------
+  # Promtail - tails container logs from the Docker socket / log dir
+  # and ships them to Loki, labeled by container name.
+  # ---------------------------------------------------------------------
+  promtail:
+    image: grafana/promtail:3.3.0
+    container_name: promtail
+    command: ["-config.file=/etc/promtail/promtail-config.yaml"]
+    volumes:
+      - ./promtail/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    networks: [observability]
+
+  # ---------------------------------------------------------------------
+  # Tempo - distributed tracing backend.
+  # ---------------------------------------------------------------------
+  tempo:
+    image: grafana/tempo:2.6.0
+    container_name: tempo
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"   # Tempo query API
+    networks: [observability]
+
+  # ---------------------------------------------------------------------
+  # Grafana - dashboards + explore, datasources provisioned as code.
+  # ---------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: grafana
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    networks: [observability]
+
+networks:
+  observability:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  grafana-data:

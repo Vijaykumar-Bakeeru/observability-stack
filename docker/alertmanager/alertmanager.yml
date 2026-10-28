@@ -1,0 +1,55 @@
+# Alertmanager config - routes Prometheus alerts (docker/prometheus/alert-rules.yml)
+# to Slack. The webhook URL itself is never committed: it's read from a
+# mounted file (slack_api_url_file), see docker/alertmanager/secrets/slack_url.example.
+
+global:
+  resolve_timeout: 5m
+  slack_api_url_file: /etc/alertmanager/secrets/slack_url
+
+route:
+  receiver: slack-default
+  group_by: ["alertname", "service"]
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Critical alerts page more often; everything else uses the default
+    # 4h repeat interval above so Slack doesn't get spammed by a known issue.
+    - matchers:
+        - severity = "critical"
+      receiver: slack-critical
+      repeat_interval: 1h
+
+receivers:
+  - name: slack-default
+    slack_configs:
+      - channel: "#observability-alerts"
+        send_resolved: true
+        title: '{{ if eq .Status "firing" }}:red_circle:{{ else }}:large_green_circle:{{ end }} [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        text: >-
+          {{ range .Alerts }}*Service:* {{ .Labels.service }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+          {{ end }}
+
+  - name: slack-critical
+    slack_configs:
+      - channel: "#observability-alerts-critical"
+        send_resolved: true
+        title: ':rotating_light: [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        text: >-
+          {{ range .Alerts }}*Service:* {{ .Labels.service }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+          {{ end }}
+
+inhibit_rules:
+  # If the critical (>50%) error rate alert is firing, don't also spam the
+  # warning-level (>20%) one for the same service - it's a strict superset.
+  - source_matchers:
+      - alertname = "HighErrorRateCritical"
+    target_matchers:
+      - alertname = "HighErrorRate"
+    equal: ["service"]

@@ -1,0 +1,30 @@
+# Copy this file to contactpoints.yaml (gitignored - keeps the real webhook
+# out of git) and replace the placeholder URL below with a real Slack
+# Incoming Webhook (see docker/alertmanager/secrets/slack_url.example for
+# how to create one - it's the same kind of webhook, can be a different
+# channel/app if you want Grafana-native alerts separated from
+# Prometheus/Alertmanager alerts).
+#
+#   cp docker/grafana/provisioning/alerting/contactpoints.yaml.example \
+#      docker/grafana/provisioning/alerting/contactpoints.yaml
+#
+# This is used only by the Grafana-native alert rule in rules.yaml (the
+# Loki-based "ErrorLogSpike" rule) - all the Prometheus-based alerts in
+# docker/prometheus/alert-rules.yml go through Alertmanager instead
+# (docker/alertmanager/alertmanager.yml). Two different Slack integrations
+# because Grafana-managed alerting and Alertmanager are two independent
+# alerting engines in this stack - see README "Alerting" section for why.
+
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: slack-grafana-alerts
+    receivers:
+      - uid: slack-grafana-alerts-receiver
+        type: slack
+        settings:
+          url: "${SLACK_WEBHOOK_URL}"
+          title: '{{ template "default.title" . }}'
+          text: '{{ template "default.message" . }}'
+        disableResolveMessage: false
